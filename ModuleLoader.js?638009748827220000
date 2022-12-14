@@ -1,0 +1,116 @@
+/**
+ * @license BrainJocks CCF ModuleLoader
+ * https://brainjocks.atlassian.net/wiki/display/SDD/moduleLoader
+ * Copyright 2020
+ */
+;(function (global, factory) {
+    typeof define === 'function' && define.amd ? define(["jquery", "underscore", "eventManager", "score_ccf/Events/ModulesLoadedEvent", "score_ccf/extensions", "score_ccf/jquery.extensions", 'loglevel'], factory) :
+    typeof exports === 'object' && typeof module !== typeof void 0 ? module.exports = factory(require("jquery"), require("underscore"), require("eventManager"), require("score_ccf/Events/ModulesLoadedEvent"), require("score_ccf/extensions"), require("score_ccf/jquery.extensions"), require('loglevel')) :
+    console && console.error('ModuleLoader does not support non-amd script loading.');
+}(this/* window */, function($, _, eventManager, ModulesLoadedEvent, ext, log) {
+    "use strict";
+
+    var ModuleState = { pending: "pending", failed: "failed", loaded: "loaded" },
+        moduleNameAttr = "data-ux-module",
+        moduleStateAttr = "data-ux-state",
+        moduleArgsAttr = "data-ux-args",
+        findModulesSel = ext.supplant("[{a}][{b}='{state}']", { a:  moduleNameAttr, b: moduleStateAttr });
+
+    function ModuleLoader() { }
+
+    ModuleLoader.prototype.loadPendingModules = function loadPendingModules(scope) {
+        var def = $.Deferred(),
+            loadScope = scope,
+            moduleEls = findModuleElsByState(scope, ModuleState.pending),
+            moduleNames = _.invoke(moduleEls, "getAttribute", moduleNameAttr), // Extract module names from module elements
+            success = [], failure = [], result; // We will use these to track our progress
+
+        eventManager.pauseTriggers(); // Event manager should hold off on triggering events while new registrations are going on
+
+        require(moduleNames, function () {
+            // Here, 'arguments' are the modules loaded by requirejs
+            var modules = $.makeArray(arguments), args, i, module, initFunc;
+
+            //add XPRuleLoader for all modules
+            require(["score_ccf/XPerience/XPRuleLoader"],
+                function(xpRuleLoaderModule) {
+                    var ruleLoader = xpRuleLoaderModule.hasOwnProperty('XPRuleLoader') && xpRuleLoaderModule.XPRuleLoader instanceof Function
+                        ? new xpRuleLoaderModule.XPRuleLoader() /* named load */
+                        : xpRuleLoaderModule.__esModule === !0 && xpRuleLoaderModule.hasOwnProperty("default") && xpRuleLoaderModule.default instanceof Function ? new xpRuleLoaderModule.default() /* default module load */
+                        : xpRuleLoaderModule instanceof Function ? new xpRuleLoaderModule() /* old fashioned modules */
+                        : log.warn('Cannot load XPRuleLoader module to load XPerience Rules');
+
+                    for (i = 0; i < modules.length; i = i + 1) { // Loop over loaded modules and execute the ones that returned functions
+
+                        // If no ux args were provided then use empty object;
+                        args = JSON.parse(moduleEls[i].getAttribute(moduleArgsAttr) || "{}");
+
+                        if (typeof modules[i] === "function") {
+                            // Check for an explicit 'init' function
+                            initFunc = typeof modules[i]["init"] === "function" ? modules[i]["init"] : modules[i];
+
+                            try {
+                                // Error inside a CCF module should not stop other js from executing
+                                // Add scope property to module args and to module itself. This is used to contain the module's
+                                // js to its wrapper element - we don't want modules changing things outside of their scope.
+                                module = initFunc($.extend({ scope: moduleEls[i] }, args));
+
+                                if (module) {
+                                    Object.defineProperty(module, "ccf_scope", { value: moduleEls[i] });
+                                    $(moduleEls[i]).data("ccf_module", module).data(moduleArgsAttr, args);
+
+                                    //apply rules
+                                    if (ruleLoader && moduleEls[i].getAttribute('data-xpr-state') === 'pending' && moduleEls[i].getAttribute('data-xpr-rule') != null) {
+                                        ruleLoader.applyRules(module, moduleEls[i].getAttribute('data-xpr-rule'));
+                                    }
+                                }
+                            } catch (err) {
+                                err = moduleNames[i] + ": " + err;
+                                $(moduleEls[i]).attr(moduleStateAttr, ModuleState.failed);
+                                failure.push(err);
+                                log.error(err);
+                                continue;
+                            }
+                        }
+
+                        // Update state and clean up ux arguments from DOM so it's less cluttered
+                        $(moduleEls[i]).attr(moduleStateAttr, ModuleState.loaded).removeAttr(moduleArgsAttr);
+                        success.push(moduleNames[i]);
+                    }
+
+                    result = new ModulesLoadedEvent(failure.length > 0, success, failure, loadScope);
+                    // Event manager can now resume triggering events
+                    eventManager.registrationComplete().trigger(ModulesLoadedEvent.name, result);
+                    def.resolve(result);
+                });
+        });
+
+        return def.promise();
+    };
+
+    function findModuleElsByState(scope, state) {
+        return $(scope || "body").descendantOrSelf(ext.supplant(findModulesSel, { state: state })).toArray();
+    }
+
+    function findModulesByState(scope, state) {
+        return findModuleElsByState(scope, state).reduce(function (result, currentEl) {
+            var module = $(currentEl).data("ccf_module");
+            if (module) result.push(module);
+            return result;
+        }, []);
+    }
+
+    ModuleLoader.prototype.findLoadedModules = function findLoadedModules(scope) {
+        return findModulesByState(scope, ModuleState.loaded);
+    };
+
+    ModuleLoader.prototype.findFailedModules = function findFailedModules(scope) {
+        return findModulesByState(scope, ModuleState.failed);
+    };
+
+    ModuleLoader.prototype.findPendingModules = function findPendingModules(scope) {
+        return findModulesByState(scope, ModuleState.pending);
+    };
+
+    return new ModuleLoader(); // singleton
+}));
