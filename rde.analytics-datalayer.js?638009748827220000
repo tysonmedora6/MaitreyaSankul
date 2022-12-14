@@ -1,0 +1,273 @@
+define(['analyticsImpressions', "analyticsCore"], function (impressions, core) {
+
+    var templates = {
+        ProductDetailPage: "1487424A-4DDF-4BEC-B983-4CFE48D0CADC",
+        ProProductDetailPage: "F12A3923-0932-4547-90C1-8FC2CCFC5DF4",
+        HWHProductDetailPage: "49425CA4-8E88-4174-A6E9-6D788787AC71",
+        MastersiteProductDetailPage: "50A0F2D6-D3D7-400A-8798-3AB1BFE9F515",
+        LifecareProductDetailPage: "E6C18E0E-E85B-4D21-8D03-FBD80CC5EB63",
+        USAAProductDetailPage:"CD778379-26ED-4D0A-83A4-38B5C02F4B91"
+    };
+
+    var environments = {
+        Production: "Production",
+        QA: "QA",
+        CA: "CA",
+        Integration: "Integration",
+        Sandbox: "Sandbox",
+        Default: ""
+    };
+
+    var envURL = {
+        Production: ["www.resideo.com", "author.rde.resideo.com"],
+        QA: ["qwww.corp.rde.resideo.com", "qauthor.corp.rde.resideo.com"],
+        CA: ["www.corp.rde.resideo.com", "author.corp.rde.resideo.com"],
+        Integration: ["iwww.corp.rde.resideo.com", "iauthor.corp.rde.resideo.com"],
+        Sandbox: ["rde.com", "resideo"],
+        Default: ""
+    };
+
+    var navigationTypes = {
+        Navigate: "Navigate",
+        Reload: "Reload",
+        BackForward: "Back-Forward",
+        Other: "Other",
+        Default: ""
+    };
+
+    var navigationTypeCode = {
+        Navigate: 0,
+        Reload: 1,
+        BackForward: 2,
+        Other: 255
+    };
+
+    var prodVersion = "1";
+
+    window.tenantHWH = "honeywellhome";
+
+    return function DataLayer(args) {
+        //Track sitewide page load analytics
+        trackSitewidePageAnalytics(args.analyticsData);
+
+        //Track browser navigation
+        trackBrowserNavigation();
+
+        //Track PDP load
+        if (args.analyticsData.PageTemplate === templates.ProductDetailPage || args.analyticsData.PageTemplate === templates.ProProductDetailPage
+            || args.analyticsData.PageTemplate === templates.HWHProductDetailPage || args.analyticsData.PageTemplate === templates.MastersiteProductDetailPage ||
+            args.analyticsData.PageTemplate === templates.LifecareProductDetailPage || args.analyticsData.PageTemplate == templates.USAAProductDetailPage) {
+            trackProductDetailPage(args.analyticsData);
+        }
+
+        //Track 404 load
+        if (args.analyticsData.PagePath.split('/').pop() == args.analyticsData.NotFoudPath.split('/').pop()) {
+            trackPageNotFound();
+        }
+    }
+
+    function trackSitewidePageAnalytics(o) {
+        var environment = findEnvironment();
+        var siteBrowserTabCount = findNumberOfOpenTabs();
+        var obj = {
+            prodVersion: prodVersion,
+            pageTitle: document.title,
+            pagePath: "/" + document.location.pathname.split("/").slice(3).join("/"), //remove country/lang
+            pageCategory: o.PageCategory,
+            pageURL: document.location.href,
+            pageParameters: location.search,
+            pageHash: location.hash,
+            pageReferringURL: document.referrer,
+            pageLanguage: o.PageLanguage,
+            pageGeoRegion: o.PageGeoRegion,
+            pageBreadCrumbs: window.jQuery("ol.score-breadcrumb li").map(function () { return window.jQuery(this).text(); }).get().join("/"),
+            pageLength: window.screen.availHeight,
+            pageWidth: window.screen.availWidth,
+            pageID: o.PageItemID, 
+            userLanguage: navigator.language || navigator.userLanguage,
+            siteEnvironment: environment,
+            siteBrowserTabCount: siteBrowserTabCount,
+            pageEffectiveDate: o.LastUpdated
+        };
+        impressions.pageLoaded(obj);
+    }
+
+    function trackBrowserNavigation() {
+        var navigationType = findNavigationType();
+        var obj = {
+            browserNavType: navigationType,
+            destinationURL: document.location.href,
+            referringURL: sessionStorage.getItem('_ref_pg') || ""
+        }
+        impressions.trackNavigation(obj);
+
+        //Store current URL
+        var refPage = document.location.href || "";
+        sessionStorage.setItem('_ref_pg', refPage);
+    }
+
+    function trackProductDetailPage(o) {
+        var obj = {
+            id: o.ProductId,
+            dimension1: String(o.Dimension1),
+            name: o.Name,
+            brand: o.Brand,
+            category: o.Category
+        };
+        impressions.productDetailPageLoaded(obj);
+    }
+
+    function trackPageNotFound() {
+        var obj = {
+            pageTitle: document.title
+        };
+        impressions.pageNotFoundLoaded(obj);
+    }
+
+    function findEnvironment() {
+        if (envURL.Production.some(function (el) {
+            return el.indexOf(document.location.host.toLowerCase()) > -1;
+        })) {
+            return environments.Production;
+        }
+        else if (envURL.QA.some(function (el) {
+            return el.indexOf(document.location.host.toLowerCase()) > -1;
+        })) {
+            return environments.QA;
+        }
+        else if (envURL.Integration.some(function (el) {
+            return el.indexOf(document.location.host.toLowerCase()) > -1;
+        })) {
+            return environments.Integration;
+        }
+        else if (envURL.Sandbox.some(function (el) {
+            return el.indexOf(document.location.host.toLowerCase()) > -1;
+        }))
+        {
+            return environments.Sandbox;
+        }
+        else { return environments.Default; }
+    }
+
+    function findNavigationType() {
+        if (window.performance.navigation.type === navigationTypeCode.Navigate) {
+            return navigationTypes.Navigate;
+        }
+        else if (window.performance.navigation.type === navigationTypeCode.Reload) {
+            return navigationTypes.Reload;
+        }
+        else if (window.performance.navigation.type === navigationTypeCode.BackForward) {
+            return navigationTypes.BackForward;
+        }
+        else if (window.performance.navigation.type === navigationTypeCode.Other) {
+            return navigationTypes.Other;
+        }
+        else { return navigationTypes.Default; }
+    }
+
+    //Gets number of open site tabs
+    //Taken from https://www.simoahava.com/analytics/track-browsing-behavior-in-google-analytics/#1-1-the-performancenavigation-api
+    function findNumberOfOpenTabs() {
+
+        // Set expiration of tab count in milliseconds. The recommended default is
+        // 72 hours (259200000 ms). Set to 0 if you don't want to expire the tab count.
+        var expireTabs = 259200000;
+
+        if (!!window.Storage) {
+
+            var openTabs = JSON.parse(localStorage.getItem('_tab_ids')) || [],
+                tabId = sessionStorage.getItem('_tab_id');
+
+            var tabCount,
+                expiration,
+                newTabId;
+
+            var clearExpired = function (tabs) {
+
+                if (expireTabs === 0) { return tabs; }
+                return tabs.filter(function (tab) {
+                    try {
+                        expiration = parseInt(tab.split('_')[1], 10);
+                        return expiration > (new Date().getTime());
+                    } catch (e) {
+                        return false;
+                    }
+                });
+
+            };
+
+            var updateTabExpiration = function (tabId) {
+
+                if (expireTabs === 0) { return tabId; }
+                try {
+                    newTabId = tabId.split('_');
+                    expiration = parseInt(newTabId[1], 10);
+                    if (expiration > new Date().getTime()) {
+                        return tabId;
+                    } else {
+                        newTabId = newTabId[0] + '_' + (new Date().getTime() + expireTabs);
+                        sessionStorage.setItem('_tab_id', newTabId);
+                        return newTabId;
+                    }
+                } catch (e) {
+                    return tabId;
+                }
+
+            };
+
+            var removeTabOnUnload = function () {
+
+                var index;
+
+                // Get the most recent values from storage
+                openTabs = JSON.parse(localStorage.getItem('_tab_ids')) || [];
+                tabId = sessionStorage.getItem('_tab_id');
+
+                openTabs = clearExpired(openTabs);
+
+                if (openTabs.length && tabId !== null) {
+                    index = openTabs.indexOf(tabId);
+                    if (index > -1) {
+                        openTabs.splice(index, 1);
+                    }
+                    localStorage.setItem('_tab_ids', JSON.stringify(openTabs));
+                }
+
+            };
+
+            var generateTabId = function () {
+
+                // From https://stackoverflow.com/a/8809472/2367037
+                var d = new Date().getTime();
+                if (typeof performance !== 'undefined' && typeof performance.now === 'function') {
+                    d += performance.now(); //use high-precision timer if available
+                }
+                return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function (c) {
+                    var r = ((d/1000) * 16) % 16 | 0;
+                    d = Math.floor(d / 16);
+                    return (c === 'x' ? r : (r & 0x3 | 0x8)).toString(16);
+                }) + (expireTabs > 0 ? '_' + (new Date().getTime() + expireTabs) : '');
+
+            };
+
+            if (tabId === null) {
+                tabId = generateTabId();
+                newTab = true;
+                sessionStorage.setItem('_tab_id', tabId);
+            } else {
+                tabId = updateTabExpiration(tabId);
+            }
+
+            openTabs = clearExpired(openTabs);
+
+            if (openTabs.indexOf(tabId) === -1) {
+                openTabs.push(tabId);
+                localStorage.setItem('_tab_ids', JSON.stringify(openTabs));
+            }
+
+            tabCount = openTabs.length;
+            window.addEventListener('beforeunload', removeTabOnUnload);
+            return tabCount;
+        };
+    };
+});
