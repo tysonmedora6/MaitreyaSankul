@@ -1,0 +1,19 @@
+var initConditionalLoading = function() {
+    //check if there are components on the page that need bv.js
+    if (document.querySelector(".rde-pdp-ratings, .rde-pdp-reviews, .rde-inline-ratings, .coveo-search .CoveoResultList, .product-list div[data-bv-show], .product-related-products[data-ux-args*='\"ShowRatings\":true'], .interstitial-dialog[data-ux-args*='\"showRating\":true'], .rde-product-highlight div[data-bv-show]")) {
+        var scriptToLoad = document.getElementById("_bvScriptConditionalLoading").getAttribute("scriptToLoad");
+
+        // Adding the script tag to the end of the body
+        var body = document.body;
+        var bvScript = document.createElement('script');
+        bvScript.type = 'text/javascript';
+        bvScript.src = scriptToLoad;
+
+        // Fire the loading
+        body.appendChild(bvScript);
+    }
+};
+
+document.addEventListener("DOMContentLoaded", function () {
+    initConditionalLoading();
+});
